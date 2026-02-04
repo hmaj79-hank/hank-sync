@@ -39,9 +39,9 @@ enum Commands {
     
     /// Send file(s) to server
     Send {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
         
         /// File or directory to send
         path: PathBuf,
@@ -53,9 +53,9 @@ enum Commands {
     
     /// List files on server
     List {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
         
         /// Path to list
         #[arg(default_value = "/")]
@@ -64,9 +64,9 @@ enum Commands {
     
     /// Get server status
     Status {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
     },
     
     /// Generate default config
@@ -95,14 +95,17 @@ async fn main() -> anyhow::Result<()> {
             server::run(&bind, &root, &log_path).await?;
         }
         Commands::Send { server, path, dest } => {
+            let server = config::resolve_server(server)?;
             tracing::info!("Sending {:?} to {}", path, server);
             client::send(&server, &path, dest.as_deref()).await?;
         }
         Commands::List { server, path } => {
+            let server = config::resolve_server(server)?;
             tracing::info!("Listing {} on {}", path, server);
             client::list(&server, &path).await?;
         }
         Commands::Status { server } => {
+            let server = config::resolve_server(server)?;
             client::status(&server).await?;
         }
         Commands::Init { config_dir } => {

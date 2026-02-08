@@ -43,6 +43,12 @@ hank-sync view --server 192.168.178.20:4433 /path/auf/server.txt
 # listet aktuelles cwd (state.json)
 hank-sync list --server 192.168.178.20:4433
 
+# long list (ls -al)
+hank-sync listl --server 192.168.178.20:4433
+
+# recursive list (ls -R)
+hank-sync listr --server 192.168.178.20:4433
+
 # hoch (parent)
 hank-sync up --server 192.168.178.20:4433
 

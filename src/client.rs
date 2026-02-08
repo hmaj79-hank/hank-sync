@@ -3,6 +3,7 @@
 use anyhow::Result;
 use quinn::Endpoint;
 use std::{io::Write, path::Path};
+use chrono;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 
@@ -182,11 +183,23 @@ async fn send_file_with_path(connection: &quinn::Connection, path: &Path, remote
 }
 
 pub async fn list(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, false, false).await
+}
+
+pub async fn list_long(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, false, true).await
+}
+
+pub async fn list_recursive(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, true, false).await
+}
+
+async fn list_with(server: &str, path: &str, recursive: bool, long: bool) -> Result<()> {
     let connection = connect(server).await?;
     
     let (mut send, mut recv) = connection.open_bi().await?;
     
-    send_request(&mut send, &Request::List { path: path.to_string() }).await?;
+    send_request(&mut send, &Request::List { path: path.to_string(), recursive, long }).await?;
     
     let response = recv_response(&mut recv).await?;
     
@@ -195,12 +208,21 @@ pub async fn list(server: &str, path: &str) -> Result<()> {
             println!("📁 Contents of {}:", path);
             for entry in entries {
                 let type_indicator = if entry.is_dir { "📁" } else { "📄" };
-                let size = if entry.is_dir {
-                    String::new()
+                if long {
+                    let ts = entry.modified.map(|m| {
+                        let dt = chrono::NaiveDateTime::from_timestamp_opt(m as i64, 0)
+                            .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+                        dt.format("%Y-%m-%d %H:%M").to_string()
+                    }).unwrap_or_else(|| "-".to_string());
+                    println!("  {} {:>10} {} {}", type_indicator, entry.size, ts, entry.name);
                 } else {
-                    format!(" ({} bytes)", entry.size)
-                };
-                println!("  {} {}{}", type_indicator, entry.name, size);
+                    let size = if entry.is_dir {
+                        String::new()
+                    } else {
+                        format!(" ({} bytes)", entry.size)
+                    };
+                    println!("  {} {}{}", type_indicator, entry.name, size);
+                }
             }
         }
         _ => {

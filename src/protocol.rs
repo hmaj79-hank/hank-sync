@@ -13,6 +13,10 @@ pub enum Request {
     },
     List {
         path: String,
+        #[serde(default)]
+        recursive: bool,
+        #[serde(default)]
+        long: bool,
     },
     Get {
         path: String,
@@ -48,4 +52,6 @@ pub struct FileEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<u64>,
 }

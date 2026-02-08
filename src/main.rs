@@ -62,6 +62,26 @@ enum Commands {
         path: Option<String>,
     },
 
+    /// Long list (ls -al)
+    Listl {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+        
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
+    /// Recursive list (ls -R)
+    Listr {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+        
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
     /// Go up one directory (and list)
     Up {
         /// Server address (overrides config)
@@ -138,6 +158,32 @@ async fn main() -> anyhow::Result<()> {
             let _ = state::save(&state);
             tracing::info!("Listing {} on {}", list_path, server);
             client::list(&server, &list_path).await?;
+        }
+        Commands::Listl { server, path } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing (long) {} on {}", list_path, server);
+            client::list_long(&server, &list_path).await?;
+        }
+        Commands::Listr { server, path } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing (recursive) {} on {}", list_path, server);
+            client::list_recursive(&server, &list_path).await?;
         }
         Commands::Up { server } => {
             let server = config::resolve_server(server)?;

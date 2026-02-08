@@ -122,11 +122,11 @@ async fn handle_stream(
                 .with_message(if success { "OK".to_string() } else { format!("{:?}", result) })).await;
             result?;
         }
-        Request::List { path } => {
+        Request::List { path, recursive, long } => {
             let _ = audit_tx.send(AuditEntry::new(AuditEvent::ListRequest)
                 .with_remote(remote)
                 .with_path(&path)).await;
-            handle_list(&mut send, root, &path).await?;
+            handle_list(&mut send, root, &path, recursive, long).await?;
         }
         Request::Status => {
             let _ = audit_tx.send(AuditEntry::new(AuditEvent::StatusRequest)
@@ -196,6 +196,8 @@ async fn handle_list(
     send: &mut quinn::SendStream,
     root: &Path,
     path: &str,
+    recursive: bool,
+    long: bool,
 ) -> Result<()> {
     let clean_path = path.trim_start_matches('/').replace("..", "");
     let dir = if clean_path.is_empty() {
@@ -207,15 +209,38 @@ async fn handle_list(
     let mut entries = Vec::new();
     
     if dir.is_dir() {
-        let mut read_dir = fs::read_dir(&dir).await?;
-        while let Some(entry) = read_dir.next_entry().await? {
-            let meta = entry.metadata().await?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            entries.push(crate::protocol::FileEntry {
-                name,
-                is_dir: meta.is_dir(),
-                size: meta.len(),
-            });
+        if recursive {
+            for entry in walkdir::WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
+                if entry.path() == dir { continue; }
+                let metadata = entry.metadata().ok();
+                let rel = entry.path().strip_prefix(&dir).unwrap_or(entry.path());
+                let name = rel.to_string_lossy().replace('\\', "/");
+                let (is_dir, size, modified) = match metadata {
+                    Some(m) => {
+                        let modified = if long {
+                            m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs())
+                        } else { None };
+                        (m.is_dir(), m.len(), modified)
+                    }
+                    None => (entry.file_type().is_dir(), 0, None),
+                };
+                entries.push(crate::protocol::FileEntry { name, is_dir, size, modified });
+            }
+        } else {
+            let mut read_dir = fs::read_dir(&dir).await?;
+            while let Some(entry) = read_dir.next_entry().await? {
+                let meta = entry.metadata().await?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                let modified = if long {
+                    meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs())
+                } else { None };
+                entries.push(crate::protocol::FileEntry {
+                    name,
+                    is_dir: meta.is_dir(),
+                    size: meta.len(),
+                    modified,
+                });
+            }
         }
     }
     

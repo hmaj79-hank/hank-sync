@@ -208,20 +208,27 @@ async fn list_with(server: &str, path: &str, recursive: bool, long: bool) -> Res
             println!("📁 Contents of {}:", path);
             for entry in entries {
                 let type_indicator = if entry.is_dir { "📁" } else { "📄" };
+                let (name, indent) = if recursive {
+                    let depth = entry.name.matches('/').count();
+                    let base = entry.name.rsplit('/').next().unwrap_or(&entry.name);
+                    (base.to_string(), "  ".repeat(depth))
+                } else {
+                    (entry.name.clone(), String::new())
+                };
                 if long {
                     let ts = entry.modified.map(|m| {
                         let dt = chrono::NaiveDateTime::from_timestamp_opt(m as i64, 0)
                             .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
                         dt.format("%Y-%m-%d %H:%M").to_string()
                     }).unwrap_or_else(|| "-".to_string());
-                    println!("  {} {:>10} {} {}", type_indicator, entry.size, ts, entry.name);
+                    println!("{}{} {:>10} {} {}", indent, type_indicator, entry.size, ts, name);
                 } else {
                     let size = if entry.is_dir {
                         String::new()
                     } else {
                         format!(" ({} bytes)", entry.size)
                     };
-                    println!("  {} {}{}", type_indicator, entry.name, size);
+                    println!("{}{} {}{}", indent, type_indicator, name, size);
                 }
             }
         }

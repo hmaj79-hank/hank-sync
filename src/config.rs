@@ -45,6 +45,10 @@ fn default_config_dir() -> Result<PathBuf> {
         .to_path_buf())
 }
 
+pub fn config_dir() -> Result<PathBuf> {
+    default_config_dir()
+}
+
 pub fn resolve_server(override_server: Option<String>) -> Result<String> {
     if let Some(server) = override_server {
         return Ok(server);

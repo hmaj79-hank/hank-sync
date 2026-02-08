@@ -7,6 +7,7 @@ mod protocol;
 mod tls;
 mod config;
 mod audit;
+mod state;
 
 #[derive(Parser)]
 #[command(name = "hank-sync")]
@@ -57,9 +58,25 @@ enum Commands {
         #[arg(short, long)]
         server: Option<String>,
         
-        /// Path to list
-        #[arg(default_value = "/")]
-        path: String,
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
+    /// Go up one directory (and list)
+    Up {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+    },
+
+    /// Go down: back to previous dir, or into <dir> (and list)
+    Down {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+
+        /// Directory to enter
+        dir: Option<String>,
     },
 
     /// View (dump) a file from server
@@ -111,8 +128,43 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::List { server, path } => {
             let server = config::resolve_server(server)?;
-            tracing::info!("Listing {} on {}", path, server);
-            client::list(&server, &path).await?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing {} on {}", list_path, server);
+            client::list(&server, &list_path).await?;
+        }
+        Commands::Up { server } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let parent = std::path::Path::new(&state.cwd)
+                .parent()
+                .unwrap_or(std::path::Path::new("/"))
+                .to_string_lossy()
+                .to_string();
+            state.prev = state.cwd.clone();
+            state.cwd = state::normalize(&parent);
+            let _ = state::save(&state);
+            client::list(&server, &state.cwd).await?;
+        }
+        Commands::Down { server, dir } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            if let Some(d) = dir {
+                let next = state::join(&state.cwd, &d);
+                state.prev = state.cwd.clone();
+                state.cwd = next;
+            } else {
+                std::mem::swap(&mut state.cwd, &mut state.prev);
+                state.cwd = state::normalize(&state.cwd);
+            }
+            let _ = state::save(&state);
+            client::list(&server, &state.cwd).await?;
         }
         Commands::Status { server } => {
             let server = config::resolve_server(server)?;

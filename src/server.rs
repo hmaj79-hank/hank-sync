@@ -5,7 +5,7 @@ use quinn::Endpoint;
 use std::net::SocketAddr;
 use std::path::Path;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::audit::{AuditEntry, AuditEvent, AuditLogger};
@@ -133,6 +133,12 @@ async fn handle_stream(
                 .with_remote(remote)).await;
             handle_status(&mut send, root).await?;
         }
+        Request::Get { path } => {
+            let _ = audit_tx.send(AuditEntry::new(AuditEvent::FileRequest)
+                .with_remote(remote)
+                .with_path(&path)).await;
+            handle_get(&mut send, root, &path).await?;
+        }
     }
     
     Ok(())
@@ -239,6 +245,36 @@ async fn handle_status(
         file_count,
     }).await?;
     
+    Ok(())
+}
+
+async fn handle_get(
+    send: &mut quinn::SendStream,
+    root: &Path,
+    path: &str,
+) -> Result<()> {
+    let clean_path = path.trim_start_matches('/').replace("..", "");
+    let file_path = root.join(&clean_path);
+
+    let metadata = fs::metadata(&file_path).await?;
+    if !metadata.is_file() {
+        send_response(send, Response::Error { message: "Not a file".into() }).await?;
+        return Ok(());
+    }
+
+    let size = metadata.len();
+    send_response(send, Response::File { size }).await?;
+
+    let mut file = fs::File::open(&file_path).await?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut sent = 0u64;
+    while sent < size {
+        let n = file.read(&mut buf).await?;
+        if n == 0 { break; }
+        send.write_all(&buf[..n]).await?;
+        sent += n as u64;
+    }
+
     Ok(())
 }
 

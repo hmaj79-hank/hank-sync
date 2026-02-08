@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use quinn::Endpoint;
-use std::path::Path;
+use std::{io::Write, path::Path};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 
@@ -233,6 +233,41 @@ pub async fn status(server: &str) -> Result<()> {
         }
     }
     
+    connection.close(0u32.into(), b"done");
+    Ok(())
+}
+
+pub async fn view(server: &str, path: &str) -> Result<()> {
+    let connection = connect(server).await?;
+
+    let (mut send, mut recv) = connection.open_bi().await?;
+    send_request(&mut send, &Request::Get { path: path.to_string() }).await?;
+
+    let response = recv_response(&mut recv).await?;
+    match response {
+        Response::File { size } => {
+            let mut remaining = size as usize;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut out = std::io::stdout();
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, buf.len());
+                let n = match recv.read(&mut buf[..to_read]).await? {
+                    Some(n) => n,
+                    None => break,
+                };
+                if n == 0 { break; }
+                out.write_all(&buf[..n])?;
+                remaining -= n;
+            }
+        }
+        Response::Error { message } => {
+            anyhow::bail!("Server error: {}", message);
+        }
+        other => {
+            anyhow::bail!("Unexpected response: {:?}", other);
+        }
+    }
+
     connection.close(0u32.into(), b"done");
     Ok(())
 }

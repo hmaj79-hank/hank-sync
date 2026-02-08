@@ -14,6 +14,9 @@ pub enum Request {
     List {
         path: String,
     },
+    Get {
+        path: String,
+    },
     Status,
 }
 
@@ -26,6 +29,9 @@ pub enum Response {
     },
     List {
         entries: Vec<FileEntry>,
+    },
+    File {
+        size: u64,
     },
     Status {
         root: String,

@@ -61,6 +61,16 @@ enum Commands {
         #[arg(default_value = "/")]
         path: String,
     },
+
+    /// View (dump) a file from server
+    View {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+
+        /// File path to view
+        path: String,
+    },
     
     /// Get server status
     Status {
@@ -107,6 +117,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status { server } => {
             let server = config::resolve_server(server)?;
             client::status(&server).await?;
+        }
+        Commands::View { server, path } => {
+            let server = config::resolve_server(server)?;
+            client::view(&server, &path).await?;
         }
         Commands::Init { config_dir } => {
             config::init(config_dir.as_deref())?;

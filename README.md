@@ -31,6 +31,12 @@ hank-sync send --server 192.168.178.20:4433 ./my-project/
 hank-sync send --server 192.168.178.20:4433 ./data/ --dest backup/2024/
 ```
 
+### Datei ansehen (Dump)
+
+```bash
+hank-sync view --server 192.168.178.20:4433 /path/auf/server.txt
+```
+
 ### Status abfragen
 
 ```bash

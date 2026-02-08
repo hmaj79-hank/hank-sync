@@ -7,6 +7,7 @@ mod protocol;
 mod tls;
 mod config;
 mod audit;
+mod state;
 
 #[derive(Parser)]
 #[command(name = "hank-sync")]
@@ -39,9 +40,9 @@ enum Commands {
     
     /// Send file(s) to server
     Send {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
         
         /// File or directory to send
         path: PathBuf,
@@ -53,20 +54,66 @@ enum Commands {
     
     /// List files on server
     List {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
         
-        /// Path to list
-        #[arg(default_value = "/")]
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
+    /// Long list (ls -al)
+    Listl {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+        
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
+    /// Recursive list (ls -R)
+    Listr {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+        
+        /// Path to list (defaults to current cwd)
+        path: Option<String>,
+    },
+
+    /// Go up one directory (and list)
+    Up {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+    },
+
+    /// Go down: back to previous dir, or into <dir> (and list)
+    Down {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+
+        /// Directory to enter
+        dir: Option<String>,
+    },
+
+    /// View (dump) a file from server
+    View {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+
+        /// File path to view
         path: String,
     },
     
     /// Get server status
     Status {
-        /// Server address
+        /// Server address (overrides config)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
     },
     
     /// Generate default config
@@ -95,15 +142,83 @@ async fn main() -> anyhow::Result<()> {
             server::run(&bind, &root, &log_path).await?;
         }
         Commands::Send { server, path, dest } => {
+            let server = config::resolve_server(server)?;
             tracing::info!("Sending {:?} to {}", path, server);
             client::send(&server, &path, dest.as_deref()).await?;
         }
         Commands::List { server, path } => {
-            tracing::info!("Listing {} on {}", path, server);
-            client::list(&server, &path).await?;
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing {} on {}", list_path, server);
+            client::list(&server, &list_path).await?;
+        }
+        Commands::Listl { server, path } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing (long) {} on {}", list_path, server);
+            client::list_long(&server, &list_path).await?;
+        }
+        Commands::Listr { server, path } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let list_path = match path {
+                Some(p) => state::normalize(&p),
+                None => state::normalize(&state.cwd),
+            };
+            state.prev = state.cwd.clone();
+            state.cwd = list_path.clone();
+            let _ = state::save(&state);
+            tracing::info!("Listing (recursive) {} on {}", list_path, server);
+            client::list_recursive(&server, &list_path).await?;
+        }
+        Commands::Up { server } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            let parent = std::path::Path::new(&state.cwd)
+                .parent()
+                .unwrap_or(std::path::Path::new("/"))
+                .to_string_lossy()
+                .to_string();
+            state.prev = state.cwd.clone();
+            state.cwd = state::normalize(&parent);
+            let _ = state::save(&state);
+            client::list(&server, &state.cwd).await?;
+        }
+        Commands::Down { server, dir } => {
+            let server = config::resolve_server(server)?;
+            let mut state = state::load().unwrap_or_default();
+            if let Some(d) = dir {
+                let next = state::join(&state.cwd, &d);
+                state.prev = state.cwd.clone();
+                state.cwd = next;
+            } else {
+                std::mem::swap(&mut state.cwd, &mut state.prev);
+                state.cwd = state::normalize(&state.cwd);
+            }
+            let _ = state::save(&state);
+            client::list(&server, &state.cwd).await?;
         }
         Commands::Status { server } => {
+            let server = config::resolve_server(server)?;
             client::status(&server).await?;
+        }
+        Commands::View { server, path } => {
+            let server = config::resolve_server(server)?;
+            client::view(&server, &path).await?;
         }
         Commands::Init { config_dir } => {
             config::init(config_dir.as_deref())?;

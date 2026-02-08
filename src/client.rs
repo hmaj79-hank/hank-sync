@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use quinn::Endpoint;
-use std::path::Path;
+use std::{io::Write, path::Path};
+use chrono;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 
@@ -182,11 +183,23 @@ async fn send_file_with_path(connection: &quinn::Connection, path: &Path, remote
 }
 
 pub async fn list(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, false, false).await
+}
+
+pub async fn list_long(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, false, true).await
+}
+
+pub async fn list_recursive(server: &str, path: &str) -> Result<()> {
+    list_with(server, path, true, false).await
+}
+
+async fn list_with(server: &str, path: &str, recursive: bool, long: bool) -> Result<()> {
     let connection = connect(server).await?;
     
     let (mut send, mut recv) = connection.open_bi().await?;
     
-    send_request(&mut send, &Request::List { path: path.to_string() }).await?;
+    send_request(&mut send, &Request::List { path: path.to_string(), recursive, long }).await?;
     
     let response = recv_response(&mut recv).await?;
     
@@ -195,12 +208,28 @@ pub async fn list(server: &str, path: &str) -> Result<()> {
             println!("📁 Contents of {}:", path);
             for entry in entries {
                 let type_indicator = if entry.is_dir { "📁" } else { "📄" };
-                let size = if entry.is_dir {
-                    String::new()
+                let (name, indent) = if recursive {
+                    let depth = entry.name.matches('/').count();
+                    let base = entry.name.rsplit('/').next().unwrap_or(&entry.name);
+                    (base.to_string(), "  ".repeat(depth))
                 } else {
-                    format!(" ({} bytes)", entry.size)
+                    (entry.name.clone(), String::new())
                 };
-                println!("  {} {}{}", type_indicator, entry.name, size);
+                if long {
+                    let ts = entry.modified.map(|m| {
+                        let dt = chrono::NaiveDateTime::from_timestamp_opt(m as i64, 0)
+                            .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+                        dt.format("%Y-%m-%d %H:%M").to_string()
+                    }).unwrap_or_else(|| "-".to_string());
+                    println!("{}{} {:>10} {} {}", indent, type_indicator, entry.size, ts, name);
+                } else {
+                    let size = if entry.is_dir {
+                        String::new()
+                    } else {
+                        format!(" ({} bytes)", entry.size)
+                    };
+                    println!("{}{} {}{}", indent, type_indicator, name, size);
+                }
             }
         }
         _ => {
@@ -233,6 +262,41 @@ pub async fn status(server: &str) -> Result<()> {
         }
     }
     
+    connection.close(0u32.into(), b"done");
+    Ok(())
+}
+
+pub async fn view(server: &str, path: &str) -> Result<()> {
+    let connection = connect(server).await?;
+
+    let (mut send, mut recv) = connection.open_bi().await?;
+    send_request(&mut send, &Request::Get { path: path.to_string() }).await?;
+
+    let response = recv_response(&mut recv).await?;
+    match response {
+        Response::File { size } => {
+            let mut remaining = size as usize;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut out = std::io::stdout();
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, buf.len());
+                let n = match recv.read(&mut buf[..to_read]).await? {
+                    Some(n) => n,
+                    None => break,
+                };
+                if n == 0 { break; }
+                out.write_all(&buf[..n])?;
+                remaining -= n;
+            }
+        }
+        Response::Error { message } => {
+            anyhow::bail!("Server error: {}", message);
+        }
+        other => {
+            anyhow::bail!("Unexpected response: {:?}", other);
+        }
+    }
+
     connection.close(0u32.into(), b"done");
     Ok(())
 }

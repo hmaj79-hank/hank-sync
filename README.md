@@ -31,6 +31,34 @@ hank-sync send --server 192.168.178.20:4433 ./my-project/
 hank-sync send --server 192.168.178.20:4433 ./data/ --dest backup/2024/
 ```
 
+### Datei ansehen (Dump)
+
+```bash
+hank-sync view --server 192.168.178.20:4433 /path/auf/server.txt
+```
+
+### Navigieren (cwd im Client)
+
+```bash
+# listet aktuelles cwd (state.json)
+hank-sync list --server 192.168.178.20:4433
+
+# long list (ls -al)
+hank-sync listl --server 192.168.178.20:4433
+
+# recursive list (ls -R)
+hank-sync listr --server 192.168.178.20:4433
+
+# hoch (parent)
+hank-sync up --server 192.168.178.20:4433
+
+# zurück zum vorherigen Verzeichnis
+hank-sync down --server 192.168.178.20:4433
+
+# in Unterordner wechseln
+hank-sync down --server 192.168.178.20:4433 logs
+```
+
 ### Status abfragen
 
 ```bash

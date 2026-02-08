@@ -31,6 +31,7 @@ pub enum AuditEvent {
     FileRejected,
     ListRequest,
     StatusRequest,
+    FileRequest,
     Error,
 }
 

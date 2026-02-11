@@ -6,7 +6,7 @@ Einfaches Tool zum Kopieren von Dateien über QUIC.
 
 - **QUIC Transport** — schnell, NAT-freundlich, verschlüsselt
 - **Server-Modus** — empfängt Dateien in konfigurierbares Root-Dir
-- **Client-Modus** — sendet Dateien/Verzeichnisse
+- **Client-Modus** — sendet und holt Dateien/Verzeichnisse
 - **Self-signed Certs** — automatisch generiert (später: hank-ca Integration)
 
 ## Usage
@@ -22,13 +22,23 @@ hank-sync server --root /backup/incoming --bind 0.0.0.0:4433
 
 ```bash
 # Einzelne Datei
-hank-sync send --server 192.168.178.20:4433 myfile.txt
+hank-sync put --server 192.168.178.20:4433 myfile.txt
 
 # Verzeichnis
-hank-sync send --server 192.168.178.20:4433 ./my-project/
+hank-sync put --server 192.168.178.20:4433 ./my-project/
 
 # Mit Ziel-Pfad
-hank-sync send --server 192.168.178.20:4433 ./data/ --dest backup/2024/
+hank-sync put --server 192.168.178.20:4433 ./data/ --dest backup/2024/
+```
+
+### Datei holen (Download)
+
+```bash
+# Datei vom Server holen (im aktuellen Ordner speichern)
+hank-sync get --server 192.168.178.20:4433 /path/auf/server.txt
+
+# Datei in Zielpfad speichern
+hank-sync get --server 192.168.178.20:4433 /path/auf/server.txt --dest ./downloads/
 ```
 
 ### Datei ansehen (Dump)

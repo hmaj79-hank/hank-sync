@@ -38,8 +38,8 @@ enum Commands {
         audit_log: Option<PathBuf>,
     },
     
-    /// Send file(s) to server
-    Send {
+    /// Put (upload) file(s) to server
+    Put {
         /// Server address (overrides config)
         #[arg(short, long)]
         server: Option<String>,
@@ -109,6 +109,20 @@ enum Commands {
         path: String,
     },
     
+    /// Get (download) a file from server
+    Get {
+        /// Server address (overrides config)
+        #[arg(short, long)]
+        server: Option<String>,
+
+        /// File path on server
+        path: String,
+
+        /// Destination path on client (file or directory)
+        #[arg(short, long)]
+        dest: Option<PathBuf>,
+    },
+
     /// Get server status
     Status {
         /// Server address (overrides config)
@@ -141,10 +155,10 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!("Audit log: {:?}", log_path);
             server::run(&bind, &root, &log_path).await?;
         }
-        Commands::Send { server, path, dest } => {
+        Commands::Put { server, path, dest } => {
             let server = config::resolve_server(server)?;
-            tracing::info!("Sending {:?} to {}", path, server);
-            client::send(&server, &path, dest.as_deref()).await?;
+            tracing::info!("Putting {:?} to {}", path, server);
+            client::put(&server, &path, dest.as_deref()).await?;
         }
         Commands::List { server, path } => {
             let server = config::resolve_server(server)?;
@@ -219,6 +233,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::View { server, path } => {
             let server = config::resolve_server(server)?;
             client::view(&server, &path).await?;
+        }
+        Commands::Get { server, path, dest } => {
+            let server = config::resolve_server(server)?;
+            client::get(&server, &path, dest.as_deref()).await?;
         }
         Commands::Init { config_dir } => {
             config::init(config_dir.as_deref())?;

@@ -1,11 +1,11 @@
-//! QUIC client - sends files
+//! QUIC client - uploads and fetches files
 
 use anyhow::Result;
 use quinn::Endpoint;
 use std::{io::Write, path::Path};
 use chrono;
 use tokio::fs;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::protocol::{Request, Response};
 use crate::tls;
@@ -26,7 +26,7 @@ async fn connect(server: &str) -> Result<quinn::Connection> {
     Ok(connection)
 }
 
-pub async fn send(server: &str, path: &Path, dest: Option<&str>) -> Result<()> {
+pub async fn put(server: &str, path: &Path, dest: Option<&str>) -> Result<()> {
     let connection = connect(server).await?;
     
     if path.is_file() {
@@ -288,6 +288,56 @@ pub async fn view(server: &str, path: &str) -> Result<()> {
                 out.write_all(&buf[..n])?;
                 remaining -= n;
             }
+        }
+        Response::Error { message } => {
+            anyhow::bail!("Server error: {}", message);
+        }
+        other => {
+            anyhow::bail!("Unexpected response: {:?}", other);
+        }
+    }
+
+    connection.close(0u32.into(), b"done");
+    Ok(())
+}
+
+pub async fn get(server: &str, path: &str, dest: Option<&Path>) -> Result<()> {
+    let connection = connect(server).await?;
+
+    let (mut send, mut recv) = connection.open_bi().await?;
+    send_request(&mut send, &Request::Get { path: path.to_string() }).await?;
+
+    let response = recv_response(&mut recv).await?;
+    match response {
+        Response::File { size } => {
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
+            let mut dest_path = match dest {
+                Some(d) if d.is_dir() => d.join(filename),
+                Some(d) => d.to_path_buf(),
+                None => std::path::PathBuf::from(filename),
+            };
+            if let Some(parent) = dest_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent).await?;
+                }
+            }
+            let mut file = fs::File::create(&dest_path).await?;
+            let mut remaining = size as usize;
+            let mut buf = vec![0u8; 64 * 1024];
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, buf.len());
+                let n = match recv.read(&mut buf[..to_read]).await? {
+                    Some(n) => n,
+                    None => break,
+                };
+                if n == 0 { break; }
+                file.write_all(&buf[..n]).await?;
+                remaining -= n;
+            }
+            file.flush().await?;
+            tracing::info!("✅ Saved: {}", dest_path.display());
         }
         Response::Error { message } => {
             anyhow::bail!("Server error: {}", message);
